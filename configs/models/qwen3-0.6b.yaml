@@ -1,0 +1,7 @@
+# Fast local/CPU debugging model with the same family & template as Qwen3-8B.
+name: Qwen/Qwen3-0.6B
+backend: nnterp
+dtype: float32
+device_map: cpu
+chat_template_kwargs:
+  enable_thinking: false

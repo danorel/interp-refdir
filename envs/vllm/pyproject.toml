@@ -1,0 +1,7 @@
+# Separate env: vLLM pins its own torch, which often conflicts with nnterp/nnsight.
+# Install on the GPU box only:  uv sync --project envs/vllm
+[project]
+name = "interptemp-vllm"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = ["vllm>=0.10"]

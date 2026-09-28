@@ -1,0 +1,42 @@
+name: example_steering
+target: experiments.example_steering.experiment:SteeringExperiment
+seed: 0
+output_dir: outputs
+model:
+  name: Qwen/Qwen3-0.6B
+  backend: nnterp
+  dtype: float32
+  device_map: cpu
+  revision: null
+  add_bos: true
+  chat_template_kwargs:
+    enable_thinking: false
+  backend_kwargs: {}
+generation:
+  max_new_tokens: 40
+  do_sample: false
+  temperature: 1.0
+  top_p: 1.0
+  batch_size: 8
+  skip_special_tokens: true
+judge: null
+params:
+  tasks:
+    positive:
+      type: jsonl
+      path: experiments/example_steering/data/positive.jsonl
+    negative:
+      type: jsonl
+      path: experiments/example_steering/data/negative.jsonl
+    eval:
+      type: jsonl
+      path: experiments/example_steering/data/eval.jsonl
+  layer_frac: 0.5
+  positions:
+  - -1
+  scales:
+  - 0.0
+  - 1.0
+  - 2.0
+  - 4.0
+  n_random_controls: 3

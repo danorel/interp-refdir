@@ -1,0 +1,9 @@
+# Generation-only (bulk CoT sampling). Needs `uv sync --project envs/vllm` on the pod.
+name: Qwen/Qwen3-8B
+backend: vllm
+dtype: bfloat16
+chat_template_kwargs:
+  enable_thinking: true
+backend_kwargs:
+  gpu_memory_utilization: 0.85
+  max_model_len: 16384

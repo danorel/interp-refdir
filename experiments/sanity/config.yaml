@@ -1,0 +1,10 @@
+# Run on every new pod / model before anything else:
+#   uv run interp-run experiments/sanity/config.yaml
+#   uv run interp-run experiments/sanity/config.yaml model=configs/models/gemma-3-4b-it.yaml
+name: sanity
+target: interptemp.sanity:SanityExperiment
+model: configs/models/qwen3-8b.yaml
+params:
+  hf_parity: true      # loads a 2nd copy of the weights
+  batch_atol: 0.5      # bf16 left-padding noise on logits; argmax must still agree
+  ablation_rel_tol: 0.01

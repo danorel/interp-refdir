@@ -1,0 +1,4 @@
+# Different family: exercises BOS handling (template already contains <bos>).
+name: google/gemma-3-4b-it
+backend: nnterp
+dtype: bfloat16

@@ -1,0 +1,5 @@
+name: Qwen/Qwen3-8B
+backend: nnterp
+dtype: bfloat16
+chat_template_kwargs:
+  enable_thinking: false  # flip per experiment for CoT work

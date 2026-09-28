@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.cache/
+outputs/
+*.pt
+*.safetensors
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+envs/vllm/.venv/
+envs/vllm/uv.lock
