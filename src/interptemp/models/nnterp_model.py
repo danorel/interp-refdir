@@ -5,6 +5,11 @@ nnsight gotchas encoded here (verified on nnsight 0.7 / nnterp 1.3):
 - Variables created inside a `with trace` block don't escape unless `.save()`d; containers
   must be created outside the block.
 - `generator.output` contains prompt + new tokens.
+- The first `.save()` mounts `save` on `object` process-wide, so it shows up in `dir()` of
+  every class. anyio's TypedAttributeSet rejects un-annotated public attributes at subclass
+  creation, and anyio defines its subclasses lazily (on the first HTTP client / request):
+  after a trace, the OpenRouter judge would fail. Importing them here defines them before
+  the mount (tests/test_nnsight_compat.py).
 """
 
 from __future__ import annotations
@@ -14,6 +19,11 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+
+# Must precede nnsight's `save` mount, see docstring: every anyio TypedAttributeSet subclass.
+from anyio.abc import SocketAttribute  # noqa: F401
+from anyio.streams.file import FileStreamAttribute  # noqa: F401
+from anyio.streams.tls import TLSAttribute  # noqa: F401
 
 from interptemp.config import GenerationConfig, ModelConfig
 from interptemp.interventions import Intervention, group_by_site
