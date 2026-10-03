@@ -189,6 +189,11 @@ def plot_conditions(run: Path, summary: dict) -> Path:
 
     cond = summary["eval"]["conditions"]
     alpha = summary["direction"]["alpha"]
+    # Judge labels once the judge is validated; substring refusal is the fallback.
+    metric = "refusal" if "refusal" in next(iter(cond.values())) else "substring_refusal"
+    # `random*` is a pooled view of random_0..4; skip it so rows aren't counted twice.
+    missing = sum(c.get("judge_missing", 0) for k, c in cond.items() if not k.endswith("random*"))
+    n_rows = sum(c[metric]["n"] for k, c in cond.items() if not k.endswith("random*"))
     panels = [
         ("harmful", "ablate", "Necessity: ablate on harmful (lower = refusal removed)"),
         ("harmless", "add", f"Sufficiency: add α={alpha}·vector on harmless (higher = induced)"),
@@ -199,7 +204,7 @@ def plot_conditions(run: Path, summary: dict) -> Path:
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
     for ax, (pset, iv, title) in zip(axes, panels, strict=True):
         for i, (iv_override, vec, _label, color) in enumerate(bars):
-            s = cond[f"{pset}/{iv_override or iv}/{vec}"]["substring_refusal"]
+            s = cond[f"{pset}/{iv_override or iv}/{vec}"][metric]
             v, (lo, hi) = s["rate"] * 100, (x * 100 for x in s["ci95"])
             ax.bar(i, v, width=0.6, color=color)
             ax.errorbar(i, v, yerr=[[v - lo], [hi - v]], color=INK, capsize=4, elinewidth=1.2)
@@ -207,12 +212,14 @@ def plot_conditions(run: Path, summary: dict) -> Path:
         ax.set_xticks(range(len(bars)), [b[2] for b in bars], fontsize=9, color=MUTED)
         ax.set_title(title, loc="left", fontsize=10, color=INK)
         style(ax)
-    axes[0].set_ylabel("substring refusal rate on test, %", color=MUTED, fontsize=10)
+    label = "judge" if metric == "refusal" else "substring"
+    axes[0].set_ylabel(f"{label} refusal rate on test, %", color=MUTED, fontsize=10)
     axes[0].set_ylim(0, 110)
     fig.suptitle(
         f"{summary['model']} · layer {summary['direction']['layer']} · n=64 per bar "
-        "(random: 5×64) · Wilson 95% CI",
-        x=0.01, ha="left", fontsize=11, color=INK, fontweight="bold",
+        f"(random: 5×64) · Wilson 95% CI\n{missing}/{n_rows} rows blocked by the judge's "
+        "provider, counted as non-refusal",
+        x=0.01, ha="left", fontsize=10, color=INK, fontweight="bold",
     )  # fmt: skip
     fig.tight_layout()
     out = run / "conditions.png"

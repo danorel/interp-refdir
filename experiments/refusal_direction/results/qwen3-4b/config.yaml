@@ -31,7 +31,6 @@ judge:
 params:
   stages:
   - baseline
-  - sweep
   - alpha
   - eval
   data_dir: experiments/refusal_direction/data
@@ -61,6 +60,6 @@ params:
   max_incoherent: 0.1
   min_baseline_refusal: 0.7
   n_random: 5
-  layer: null
-  pos: null
+  layer: 21
+  pos: -9
   alpha: 1.0
