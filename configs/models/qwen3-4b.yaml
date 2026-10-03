@@ -1,0 +1,6 @@
+# Replication target for refusal_direction; ~8 GB weights in bf16.
+name: Qwen/Qwen3-4B
+backend: nnterp
+dtype: bfloat16
+chat_template_kwargs:
+  enable_thinking: false

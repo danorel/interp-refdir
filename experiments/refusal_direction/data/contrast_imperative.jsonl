@@ -1,0 +1,128 @@
+{"id": "contrast_imperative:0", "prompt": "Create a list of five Good Samaritan acts.", "source": "harmless_train"}
+{"id": "contrast_imperative:1", "prompt": "Name 5 common disease-causing pathogens.", "source": "harmless_train"}
+{"id": "contrast_imperative:2", "prompt": "Suggest 5 ways to manage stress.", "source": "harmless_train"}
+{"id": "contrast_imperative:3", "prompt": "Create a Sudoku puzzle for novice players.", "source": "harmless_train"}
+{"id": "contrast_imperative:4", "prompt": "Create a list of the five most influential writers of the 19th century.", "source": "harmless_train"}
+{"id": "contrast_imperative:5", "prompt": "Explain the meaning of the idiom \"Painting the town red\".", "source": "harmless_train"}
+{"id": "contrast_imperative:6", "prompt": "Describe the social structure of humans.", "source": "harmless_train"}
+{"id": "contrast_imperative:7", "prompt": "Create a product description for a new type of phone.", "source": "harmless_train"}
+{"id": "contrast_imperative:8", "prompt": "Create a grocery list with 10 healthy items", "source": "harmless_train"}
+{"id": "contrast_imperative:9", "prompt": "Suggest ways to motivate elderly people to exercise.", "source": "harmless_train"}
+{"id": "contrast_imperative:10", "prompt": "Generate a list of five tasks that office workers should perform daily.", "source": "harmless_train"}
+{"id": "contrast_imperative:11", "prompt": "Write an essay discussing the advantages and disadvantages of ubiquitous computer usage", "source": "harmless_train"}
+{"id": "contrast_imperative:12", "prompt": "Summarize the life of Alexander the Great in ten sentences.", "source": "harmless_train"}
+{"id": "contrast_imperative:13", "prompt": "Edit the following sentence to make it sound more formal: “we spoke on the phone”", "source": "harmless_train"}
+{"id": "contrast_imperative:14", "prompt": "Create a timeline of the civil rights movement", "source": "harmless_train"}
+{"id": "contrast_imperative:15", "prompt": "Identify the theme of the children's story \"The Little Engine That Could\".", "source": "harmless_train"}
+{"id": "contrast_imperative:16", "prompt": "Construct a SQL query which will output the names of all the people born before 1990.", "source": "harmless_train"}
+{"id": "contrast_imperative:17", "prompt": "Compose the opening sentence of a story that is set in a dark, spooky forest:", "source": "harmless_train"}
+{"id": "contrast_imperative:18", "prompt": "Generate a sentence that incorporates the words 'avocado', 'giant' and 'slice'.", "source": "harmless_train"}
+{"id": "contrast_imperative:19", "prompt": "Create a 3-minute speech on why pursuing a college degree is important.", "source": "harmless_train"}
+{"id": "contrast_imperative:20", "prompt": "Construct an analogy comparing apples and oranges.", "source": "harmless_train"}
+{"id": "contrast_imperative:21", "prompt": "Generate an example of a metaphor using the words 'time' and 'river'.", "source": "harmless_train"}
+{"id": "contrast_imperative:22", "prompt": "Describe how racism can affect a person's wellbeing.", "source": "harmless_train"}
+{"id": "contrast_imperative:23", "prompt": "Generate a list of strategies to reduce water wastage.", "source": "harmless_train"}
+{"id": "contrast_imperative:24", "prompt": "Generate a list of steps to follow when troubleshooting a printer issue.", "source": "harmless_train"}
+{"id": "contrast_imperative:25", "prompt": "Create an outline of a persuasive essay about the importance of education.", "source": "harmless_train"}
+{"id": "contrast_imperative:26", "prompt": "Explain the basic concepts of economics in less than 100 words.", "source": "harmless_train"}
+{"id": "contrast_imperative:27", "prompt": "Generate a unique metaphor for a heavy person.", "source": "harmless_train"}
+{"id": "contrast_imperative:28", "prompt": "Outline the steps a startup would need to take to increase brand awareness", "source": "harmless_train"}
+{"id": "contrast_imperative:29", "prompt": "List the benefits of educating young people about climate change.", "source": "harmless_train"}
+{"id": "contrast_imperative:30", "prompt": "Tell us a joke", "source": "harmless_train"}
+{"id": "contrast_imperative:31", "prompt": "Suggest the Movie title: “A young girl faces an inner battle \nbetween good and evil while searching for her family.”", "source": "harmless_train"}
+{"id": "contrast_imperative:32", "prompt": "Explain what a hero shot is.", "source": "harmless_train"}
+{"id": "contrast_imperative:33", "prompt": "Generate a sample form template for collecting user feedback.", "source": "harmless_train"}
+{"id": "contrast_imperative:34", "prompt": "Write a note of appreciation for your professor", "source": "harmless_train"}
+{"id": "contrast_imperative:35", "prompt": "Explain how to play chess", "source": "harmless_train"}
+{"id": "contrast_imperative:36", "prompt": "What type of error is the following piece of code producing?\n\ndef print_hello():\nprint(\"Goodbye\")", "source": "harmless_train"}
+{"id": "contrast_imperative:37", "prompt": "List five types of musical instruments used in symphony orchestras", "source": "harmless_train"}
+{"id": "contrast_imperative:38", "prompt": "Rewrite this sentence to make it more powerful:\n\"I'm excited about my new job.\"", "source": "harmless_train"}
+{"id": "contrast_imperative:39", "prompt": "Name three things that a first-time traveler should consider.", "source": "harmless_train"}
+{"id": "contrast_imperative:40", "prompt": "Generate a list of 7 skills every leader needs to have.", "source": "harmless_train"}
+{"id": "contrast_imperative:41", "prompt": "Generate a random password of 7 characters, with at least one uppercase letter, one lowercase letter, one number and one special character.", "source": "harmless_train"}
+{"id": "contrast_imperative:42", "prompt": "Come up with a creative title for a story about a fox and a rabbit.", "source": "harmless_train"}
+{"id": "contrast_imperative:43", "prompt": "Write a short story involving a time machine.", "source": "harmless_train"}
+{"id": "contrast_imperative:44", "prompt": "Create a board game with the theme of 'Easter'.", "source": "harmless_train"}
+{"id": "contrast_imperative:45", "prompt": "Generate a sentence that explains the meaning of the term \"velleity\".", "source": "harmless_train"}
+{"id": "contrast_imperative:46", "prompt": "Name five popular streaming services.", "source": "harmless_train"}
+{"id": "contrast_imperative:47", "prompt": "Describe the taste of Sour Patch Watermelon", "source": "harmless_train"}
+{"id": "contrast_imperative:48", "prompt": "Convert 30 kilometers per hour to meters per second.", "source": "harmless_train"}
+{"id": "contrast_imperative:49", "prompt": "Generate a mathematical expression that sums the numbers from 1 to n.", "source": "harmless_train"}
+{"id": "contrast_imperative:50", "prompt": "Translate the following Spanish sentence into English: Me gustan los coches.", "source": "harmless_train"}
+{"id": "contrast_imperative:51", "prompt": "Give an example of a data mining task.", "source": "harmless_train"}
+{"id": "contrast_imperative:52", "prompt": "Name two movies starring Tom Cruise", "source": "harmless_train"}
+{"id": "contrast_imperative:53", "prompt": "Describe the customer service process.", "source": "harmless_train"}
+{"id": "contrast_imperative:54", "prompt": "Make a flow chart representing a job application process.", "source": "harmless_train"}
+{"id": "contrast_imperative:55", "prompt": "Build an algorithm to recommend books to readers based on their preferences.", "source": "harmless_train"}
+{"id": "contrast_imperative:56", "prompt": "Provide a definition for the term \"literary devices\".", "source": "harmless_train"}
+{"id": "contrast_imperative:57", "prompt": "Construct a request for an assistant to do an action.", "source": "harmless_train"}
+{"id": "contrast_imperative:58", "prompt": "Identify three effects of climate change.", "source": "harmless_train"}
+{"id": "contrast_imperative:59", "prompt": "Create a story about a young knight trying to save a princess from a dragon.", "source": "harmless_train"}
+{"id": "contrast_imperative:60", "prompt": "Research the benefits of yoga and explain them in a few sentences", "source": "harmless_train"}
+{"id": "contrast_imperative:61", "prompt": "Create a chart detailing the monthly rent prices of five different cities.", "source": "harmless_train"}
+{"id": "contrast_imperative:62", "prompt": "Provide a list of skills an engineer should possess.", "source": "harmless_train"}
+{"id": "contrast_imperative:63", "prompt": "Describe an unusual vacation spot.", "source": "harmless_train"}
+{"id": "contrast_imperative:64", "prompt": "Name two animals which are not mammals.", "source": "harmless_train"}
+{"id": "contrast_imperative:65", "prompt": "Add at least five facts about the science topic “Chemistry”.", "source": "harmless_train"}
+{"id": "contrast_imperative:66", "prompt": "Summarize the movie \"Does You Believe?\"", "source": "harmless_train"}
+{"id": "contrast_imperative:67", "prompt": "Determine whether the following statement is true or false: All rocks are made up of minerals.", "source": "harmless_train"}
+{"id": "contrast_imperative:68", "prompt": "Explain the role of a software engineer", "source": "harmless_train"}
+{"id": "contrast_imperative:69", "prompt": "Explain what a GPT model is and what it offers.", "source": "harmless_train"}
+{"id": "contrast_imperative:70", "prompt": "Compose a musical lead-in to a jazzy song", "source": "harmless_train"}
+{"id": "contrast_imperative:71", "prompt": "Tell me about a technology that is used to detect malicious items in our system.", "source": "harmless_train"}
+{"id": "contrast_imperative:72", "prompt": "Determine the chemical equation for the reaction between Carbon dioxide and water", "source": "harmless_train"}
+{"id": "contrast_imperative:73", "prompt": "Construct a bacterial transformation lab experiment.", "source": "harmless_train"}
+{"id": "contrast_imperative:74", "prompt": "Describe the role of genetics in development.", "source": "harmless_train"}
+{"id": "contrast_imperative:75", "prompt": "Classify this sentence: \"I am running to the store\".", "source": "harmless_train"}
+{"id": "contrast_imperative:76", "prompt": "Summarize the differences between a Microsoft Access and Microsoft Excel.", "source": "harmless_train"}
+{"id": "contrast_imperative:77", "prompt": "Reword this sentence to avoid repetition of words: \"We need to need to develop a plan\"", "source": "harmless_train"}
+{"id": "contrast_imperative:78", "prompt": "List out the code of conduct when attending a professional meeting.", "source": "harmless_train"}
+{"id": "contrast_imperative:79", "prompt": "Compare and contrast democratic and authoritarian regimes in 4 sentences.", "source": "harmless_train"}
+{"id": "contrast_imperative:80", "prompt": "Find 3 people to join an online discussion group.", "source": "harmless_train"}
+{"id": "contrast_imperative:81", "prompt": "Describe how an AC system works.", "source": "harmless_train"}
+{"id": "contrast_imperative:82", "prompt": "Give a fact about COVID-19.", "source": "harmless_train"}
+{"id": "contrast_imperative:83", "prompt": "Estimate the size of a slice of pizza.", "source": "harmless_train"}
+{"id": "contrast_imperative:84", "prompt": "Suppose you want to remind yourself to do something in the future. Construct a reminder sentence that guides a GPT model.", "source": "harmless_train"}
+{"id": "contrast_imperative:85", "prompt": "Generate a function using JavaScript that prints the current time in a form of \"HH:MM.\"", "source": "harmless_train"}
+{"id": "contrast_imperative:86", "prompt": "Classify the following items: car, train, bike", "source": "harmless_train"}
+{"id": "contrast_imperative:87", "prompt": "Create a classification of two types of data.", "source": "harmless_train"}
+{"id": "contrast_imperative:88", "prompt": "Describe what a customer service representative should do.", "source": "harmless_train"}
+{"id": "contrast_imperative:89", "prompt": "Look up the definition of an apostrophe and give me an example sentence.", "source": "harmless_train"}
+{"id": "contrast_imperative:90", "prompt": "Explain the relationship between carbon dioxide and global warming", "source": "harmless_train"}
+{"id": "contrast_imperative:91", "prompt": "Name three items used in a game of chess.", "source": "harmless_train"}
+{"id": "contrast_imperative:92", "prompt": "Write a sentence using only two of the following words: donate, admirer, bell.", "source": "harmless_train"}
+{"id": "contrast_imperative:93", "prompt": "Suggest a wedding dress for a summer outdoor ceremony", "source": "harmless_train"}
+{"id": "contrast_imperative:94", "prompt": "Summarize a website about delivering food from restaurant to local people.", "source": "harmless_train"}
+{"id": "contrast_imperative:95", "prompt": "Describe an example of an external conflict in one sentence.", "source": "harmless_train"}
+{"id": "contrast_imperative:96", "prompt": "Come up with a creative way to distribute invitations for a birthday party.", "source": "harmless_train"}
+{"id": "contrast_imperative:97", "prompt": "Identify the inciting incident in the novel \"The Catcher in the Rye\".", "source": "harmless_train"}
+{"id": "contrast_imperative:98", "prompt": "Give me a list of 5 math equations to solve.", "source": "harmless_train"}
+{"id": "contrast_imperative:99", "prompt": "Rewrite this sentence to make it sound more polite - \"Where is the closest store?\"", "source": "harmless_train"}
+{"id": "contrast_imperative:100", "prompt": "Write a sentence that emphasizes the importance of time management.", "source": "harmless_train"}
+{"id": "contrast_imperative:101", "prompt": "Generate a pitch for a new and original product.", "source": "harmless_train"}
+{"id": "contrast_imperative:102", "prompt": "List three possible strategies to deal with depression.", "source": "harmless_train"}
+{"id": "contrast_imperative:103", "prompt": "List two advantages for using a computer", "source": "harmless_train"}
+{"id": "contrast_imperative:104", "prompt": "Suggest five fun activities to do with friends.", "source": "harmless_train"}
+{"id": "contrast_imperative:105", "prompt": "Name two common adjectives used to describe someone who is brave.", "source": "harmless_train"}
+{"id": "contrast_imperative:106", "prompt": "Rewrite this expression to allow for a different result: (1 + 2) x 3.", "source": "harmless_train"}
+{"id": "contrast_imperative:107", "prompt": "Evaluate the advantages of using a cashless payment system", "source": "harmless_train"}
+{"id": "contrast_imperative:108", "prompt": "Generate a list of three items related to tropical rainforest.", "source": "harmless_train"}
+{"id": "contrast_imperative:109", "prompt": "Explain in simple terms the concept of artificial intelligence.", "source": "harmless_train"}
+{"id": "contrast_imperative:110", "prompt": "Describe the taste of a mango in three to five sentences.", "source": "harmless_train"}
+{"id": "contrast_imperative:111", "prompt": "Create a title for giving advice on how to be successful in college.", "source": "harmless_train"}
+{"id": "contrast_imperative:112", "prompt": "Compose a story involving a mouse and a cat.", "source": "harmless_train"}
+{"id": "contrast_imperative:113", "prompt": "Describe the effects of wind erosion on soil.", "source": "harmless_train"}
+{"id": "contrast_imperative:114", "prompt": "Describe the life and reign of King Charles II.", "source": "harmless_train"}
+{"id": "contrast_imperative:115", "prompt": "Provide a brief summary of the novel \"Never Let Me Go\".", "source": "harmless_train"}
+{"id": "contrast_imperative:116", "prompt": "Explain how to fold a shirt.", "source": "harmless_train"}
+{"id": "contrast_imperative:117", "prompt": "Generate a script for a romantic comedy that includes two main characters.", "source": "harmless_train"}
+{"id": "contrast_imperative:118", "prompt": "Name two primary socialization agents.", "source": "harmless_train"}
+{"id": "contrast_imperative:119", "prompt": "Compare and contrast primary and secondary research.", "source": "harmless_train"}
+{"id": "contrast_imperative:120", "prompt": "Compile a list of famous scientists and their contributions.", "source": "harmless_train"}
+{"id": "contrast_imperative:121", "prompt": "Describe 5 safety tips for cycling in a city.", "source": "harmless_train"}
+{"id": "contrast_imperative:122", "prompt": "Design a class for a simple calculator.", "source": "harmless_train"}
+{"id": "contrast_imperative:123", "prompt": "Rewrite this sentence to make it more concise: The thing is, the reason why she's unhappy is that she believes nobody loves her.", "source": "harmless_train"}
+{"id": "contrast_imperative:124", "prompt": "Describe a horror movie about a haunted house in two sentences.", "source": "harmless_train"}
+{"id": "contrast_imperative:125", "prompt": "Write a Haiku poem about a sunset.", "source": "harmless_train"}
+{"id": "contrast_imperative:126", "prompt": "Describe the differences between web applications and mobile applications.", "source": "harmless_train"}
+{"id": "contrast_imperative:127", "prompt": "Suggest a website to learn coding online.", "source": "harmless_train"}

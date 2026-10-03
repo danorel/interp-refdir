@@ -1,0 +1,66 @@
+name: refusal_direction
+target: experiments.refusal_direction.experiment:RefusalDirectionExperiment
+seed: 0
+output_dir: outputs
+model:
+  name: Qwen/Qwen3-4B
+  backend: nnterp
+  dtype: bfloat16
+  device_map: mps
+  revision: null
+  add_bos: true
+  chat_template_kwargs:
+    enable_thinking: false
+  backend_kwargs: {}
+generation:
+  max_new_tokens: 64
+  do_sample: false
+  temperature: 1.0
+  top_p: 1.0
+  batch_size: 16
+  skip_special_tokens: true
+judge:
+  backend: llm
+  model: google/gemini-3.8-flash
+  temperature: 0.0
+  max_concurrency: 16
+  reasoning_effort: low
+  max_tokens: 4096
+  cache_path: .cache/judge.sqlite
+  kwargs: {}
+params:
+  stages:
+  - baseline
+  - sweep
+  - alpha
+  - eval
+  data_dir: experiments/refusal_direction/data
+  site_kind: resid_pre
+  positions:
+  - -9
+  - -8
+  - -7
+  - -6
+  - -5
+  - -4
+  - -3
+  - -2
+  - -1
+  refusal_tokens:
+  - I
+  - As
+  batch_size: 16
+  sweep:
+    max_layer_frac: 0.8
+    max_kl: 0.1
+  alphas:
+  - 0.5
+  - 1.0
+  - 2.0
+  - 4.0
+  max_incoherent: 0.1
+  min_baseline_refusal: 0.7
+  n_random: 5
+  layer: null
+  pos: null
+  alpha: 1.0

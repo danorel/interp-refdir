@@ -1,0 +1,36 @@
+# Replicate the refusal direction (Arditi et al. 2024) with random-vector + contrast controls.
+#   uv run python experiments/refusal_direction/prepare_data.py     # once: writes data/
+#   uv run interp-run experiments/refusal_direction/config.yaml
+#   uv run interp-run experiments/refusal_direction/config.yaml model=configs/models/qwen3-4b.yaml
+# Stages run in order within one run dir; `sweep` picks (layer, pos), `alpha` picks the
+# addition scale. To skip them, set params.layer / params.pos / params.alpha explicitly.
+name: refusal_direction
+target: experiments.refusal_direction.experiment:RefusalDirectionExperiment
+seed: 0
+model: configs/models/qwen3-0.6b.yaml
+generation:
+  max_new_tokens: 64
+  batch_size: 16
+judge:
+  backend: llm
+  model: google/gemini-3.8-flash
+  reasoning_effort: low
+params:
+  stages: [baseline, sweep, alpha, eval]
+  data_dir: experiments/refusal_direction/data
+  site_kind: resid_pre        # directions read / addition written at the input of layer l
+  # Post-instruction tokens of the Qwen3 template (enable_thinking=false):
+  # <|im_end|> \n <|im_start|> assistant \n <think> \n\n </think> \n\n
+  positions: [-9, -8, -7, -6, -5, -4, -3, -2, -1]
+  refusal_tokens: ["I", "As"] # first tokens of refusals (Qwen3: 22/32 start with "I")
+  batch_size: 16              # forward passes (sweep / logits)
+  sweep:
+    max_layer_frac: 0.8       # skip late layers: they mostly write to the unembedding
+    max_kl: 0.1               # ablation must not change harmless next-token dist. much
+  alphas: [0.5, 1.0, 2.0, 4.0]
+  max_incoherent: 0.1         # alpha stage: max incoherent rate on harmless val
+  min_baseline_refusal: 0.7   # baseline stage: warn if harmful val refusal is below this
+  n_random: 5
+  layer: null
+  pos: null
+  alpha: 1.0

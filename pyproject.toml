@@ -24,6 +24,7 @@ dev = [
     "pyright>=1.1.390",
     "pre-commit>=4.0",
     "ipykernel>=6.29",
+    "matplotlib>=3.11.2",
 ]
 
 [project.scripts]
@@ -66,6 +67,7 @@ reportCallIssue = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."] # `experiments.*` importable, as interp-run does
 markers = [
     "model: loads a real (small) model; slower, needs HF download",
     "api: calls OpenRouter; needs OPENROUTER_API_KEY",
