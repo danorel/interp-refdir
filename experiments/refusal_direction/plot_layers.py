@@ -24,7 +24,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root, for `experiments.*`
 
-from experiments.refusal_direction.experiment import refusal_score, select_direction, wilson
+from experiments.refusal_direction.metrics import refusal_score, select_direction, wilson
+from experiments.refusal_direction.schema import SweepCandidate, is_pooled
 from interptemp.config import ModelConfig
 from interptemp.interventions import DirectionalAblation
 from interptemp.models.base import InterpModel, build_model
@@ -36,18 +37,17 @@ BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
 GRAY, INK, MUTED, GRID = "#8a8985", "#0b0b0b", "#52514e", "#e6e5e0"
 
 
-def pick_positions(sweep: list[dict], max_kl: float) -> dict[int, tuple[dict, bool]]:
+def pick_positions(sweep: list[dict], max_kl: float) -> dict[int, tuple[SweepCandidate, bool]]:
     """Per layer: the sweep's own selection rule restricted to that layer (val data)."""
-    by_layer: dict[int, list[dict]] = defaultdict(list)
-    for r in sweep:
-        by_layer[r["layer"]].append(r)
+    by_layer: dict[int, list[SweepCandidate]] = defaultdict(list)
+    for row in sweep:
+        by_layer[row["layer"]].append(SweepCandidate(**row))
     out = {}
-    for layer, rows in sorted(by_layer.items()):
+    for layer, candidates in sorted(by_layer.items()):
         try:
-            row, _ = select_direction(rows, max_kl)
-            out[layer] = (row, True)
+            out[layer] = (select_direction(candidates, max_kl)[0], True)
         except ValueError:  # every position breaks harmless outputs at this layer
-            out[layer] = (min(rows, key=lambda r: r["kl"]), False)
+            out[layer] = (min(candidates, key=lambda c: c.kl), False)
     return out
 
 
@@ -75,20 +75,20 @@ def compute_curve(run: Path, device: str | None) -> list[dict]:
     rows = [{"layer": -1, "scores": clean}]  # layer -1 = no intervention
     picks = pick_positions(read_jsonl(run / "sweep.jsonl"), p["sweep"]["max_kl"])
     for layer, (sel, kl_ok) in picks.items():
-        r = dirs[layer, positions.index(sel["pos"])]
+        r = dirs[layer, positions.index(sel.pos)]
         s = scores([DirectionalAblation.everywhere(r, m.num_layers)])
         rows.append(
             {
                 "layer": layer,
-                "pos": sel["pos"],
-                "pos_token": m.tokenizer.decode([tok_ids[sel["pos"]]]),
-                "kl_val": sel["kl"],
+                "pos": sel.pos,
+                "pos_token": m.tokenizer.decode([tok_ids[sel.pos]]),
+                "kl_val": sel.kl,
                 "kl_ok": kl_ok,
-                "induce_val": sel["induce_score"],
+                "induce_val": sel.induce_score,
                 "scores": s,
             }
         )
-        print(f"layer {layer}: pos {sel['pos']} refusal {sum(x > 0 for x in s)}/{len(s)}")
+        print(f"layer {layer}: pos {sel.pos} refusal {sum(x > 0 for x in s)}/{len(s)}")
     return rows
 
 
@@ -98,9 +98,16 @@ def refusal_rate(scores: list[float]) -> tuple[float, float, float]:
     return k / n, lo, hi
 
 
-def proxy_agreement(run: Path) -> float:
-    """How often the logit proxy (score > 0) matches substring refusal on real generations."""
-    rows = read_jsonl(run / "eval_test.jsonl")
+def proxy_agreement(run: Path) -> float | None:
+    """How often the logit proxy (score > 0) matches substring refusal on real generations.
+
+    None when the generations are absent — published result dirs keep only the aggregates,
+    so they can still redraw their own plots.
+    """
+    path = run / "eval_test.jsonl"
+    if not path.exists():
+        return None
+    rows = read_jsonl(path)
     return sum((r["refusal_score"] > 0) == r["substring_refusal"] for r in rows) / len(rows)
 
 
@@ -112,7 +119,7 @@ def style(ax) -> None:
     ax.set_axisbelow(True)
 
 
-def plot_layers(run: Path, curve: list[dict], summary: dict, agree: float) -> Path:
+def plot_layers(run: Path, curve: list[dict], summary: dict, agree: float | None) -> Path:
     import matplotlib.pyplot as plt
 
     base = next(r for r in curve if r["layer"] == -1)
@@ -121,6 +128,11 @@ def plot_layers(run: Path, curve: list[dict], summary: dict, agree: float) -> Pa
     chosen = summary["direction"]["layer"]
     num_layers = summary["num_layers"]
 
+    agreement = (
+        f", agrees with substring refusal on {agree:.0%} of generations"
+        if agree is not None
+        else ""
+    )
     fig, (ax, ax_kl) = plt.subplots(
         2, 1, figsize=(10, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1.3]}
     )
@@ -163,7 +175,7 @@ def plot_layers(run: Path, curve: list[dict], summary: dict, agree: float) -> Pa
     ax.set_title(
         f"n={len(base['scores'])} harmful test prompts · bars = Wilson 95% CI · hollow = no "
         "position passes KL<0.1 at this layer\nrefusal = logit proxy P(first token ∈ refusal "
-        f"tokens) > 0.5, agrees with substring refusal on {agree:.0%} of generations",
+        f"tokens) > 0.5{agreement}",
         loc="left", color=MUTED, fontsize=8.5,
     )  # fmt: skip
     style(ax)
@@ -192,8 +204,8 @@ def plot_conditions(run: Path, summary: dict) -> Path:
     # Judge labels once the judge is validated; substring refusal is the fallback.
     metric = "refusal" if "refusal" in next(iter(cond.values())) else "substring_refusal"
     # `random*` is a pooled view of random_0..4; skip it so rows aren't counted twice.
-    missing = sum(c.get("judge_missing", 0) for k, c in cond.items() if not k.endswith("random*"))
-    n_rows = sum(c[metric]["n"] for k, c in cond.items() if not k.endswith("random*"))
+    missing = sum(c.get("judge_missing", 0) for k, c in cond.items() if not is_pooled(k))
+    n_rows = sum(c[metric]["n"] for k, c in cond.items() if not is_pooled(k))
     panels = [
         ("harmful", "ablate", "Necessity: ablate on harmful (lower = refusal removed)"),
         ("harmless", "add", f"Sufficiency: add α={alpha}·vector on harmless (higher = induced)"),
@@ -241,7 +253,10 @@ def main() -> None:
         write_jsonl(cache, curve)
     summary = json.loads((args.run / "summary.json").read_text())
     agree = proxy_agreement(args.run)
-    print(f"logit proxy vs substring agreement: {agree:.1%}")
+    print(
+        "logit proxy vs substring agreement: "
+        + (f"{agree:.1%}" if agree is not None else "n/a (no generations in this dir)")
+    )
     print(plot_layers(args.run, curve, summary, agree))
     print(plot_conditions(args.run, summary))
 

@@ -15,11 +15,10 @@ import argparse
 import json
 from pathlib import Path
 
+from experiments.refusal_direction.schema import KEY_FIELDS
 from interptemp.judges.metrics import agreement_report
 from interptemp.label import load_labels, row_key
 from interptemp.store import read_jsonl
-
-KEY_FIELDS = ["id", "intervention", "vector"]
 
 
 def main() -> None:

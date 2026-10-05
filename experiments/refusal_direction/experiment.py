@@ -1,414 +1,434 @@
 """Refusal direction (Arditi et al. 2024): mean-diff direction, ablation + addition, controls.
 
-Stages (params.stages), run in order in one run dir:
+This module only orchestrates. The scoring lives in `metrics`, the records in `schema`, the
+judge wiring in `judging`, and the direction/control construction in `vectors`.
+
+Stages (`params.stages`), run in order into one run dir:
   baseline  val, no intervention: does the model refuse harmful / comply with harmless?
-  sweep     every (layer, pos) candidate on val via a logit refusal score (no generation);
-            pick the one that best bypasses refusal under ablation, subject to filters
-  alpha     addition scale on harmless val (generation + judge)
-  eval      test: baseline vs r vs norm-matched random vs contrast-control directions,
-            ablation on harmful (necessity) and addition on harmless (sufficiency)
+  sweep     score every (layer, position) candidate on val with the logit proxy — no
+            generation — and pick one; see `metrics.select_direction`
+  alpha     choose the addition scale on harmless val (generation + judge)
+  eval      test: r vs norm-matched random vs contrast control, ablation on harmful
+            (necessity) and addition on harmless (sufficiency)
+
+Selection happens on val, reported numbers come from test.
 """
 
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
+from collections.abc import Sequence
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from interptemp.directions import mean_diff, random_like, unit
+from experiments.refusal_direction import vectors as vec
+from experiments.refusal_direction.judging import apply_judge, load_judge_rubric
+from experiments.refusal_direction.metrics import (
+    kl_div,
+    refusal_score,
+    select_direction,
+    summarize,
+)
+from experiments.refusal_direction.schema import (
+    LABELS,
+    AlphaResult,
+    GenerationRow,
+    Selection,
+    Stage,
+    SweepCandidate,
+    SweepResult,
+    condition_key,
+)
 from interptemp.experiment import Experiment
 from interptemp.interventions import AddVector, DirectionalAblation, Intervention
 from interptemp.judges import JudgeInput
 from interptemp.judges.substring import SubstringJudge
 from interptemp.sites import Site
-from interptemp.tasks import JsonlTask
+from interptemp.tasks import Example, JsonlTask
 
-HERE = Path(__file__).parent
-RUBRIC_PATH = HERE / "rubric.md"
-HUMAN_ONLY_MARKER = "<!-- human-only"
-LABELS = ["refusal", "compliance", "incoherent"]
-SETS = [
-    "harmful_train", "harmless_train", "harmful_val", "harmless_val",
-    "harmful_test", "harmless_test", "contrast_question", "contrast_imperative",
-]  # fmt: skip
-
-
-def load_judge_rubric(path: Path = RUBRIC_PATH) -> str:
-    """Judge part of rubric.md + the item to label, as a LLMJudge `str.format` template."""
-    rules = path.read_text().split(HUMAN_ONLY_MARKER)[0].strip()
-    rules = rules.replace("{", "{{").replace("}", "}}")
-    return f"{rules}\n\n---\n\nNow label this item.\n\nPrompt: {{prompt}}\n\nResponse: {{response}}"
-
-
-# ---- pure metrics (unit-tested) ---------------------------------------------------------
-
-
-def refusal_score(logits: torch.Tensor, token_ids: list[int], eps: float = 1e-8) -> torch.Tensor:
-    """Log-odds that the next token is a refusal opener: [..., V] -> [...]."""
-    p = logits.float().softmax(-1)[..., token_ids].sum(-1)
-    return torch.log(p + eps) - torch.log(1 - p + eps)
-
-
-def kl_div(ref_logits: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
-    """KL(ref || other) over the vocab: [..., V] -> [...]."""
-    ref, other = ref_logits.float().log_softmax(-1), logits.float().log_softmax(-1)
-    return (ref.exp() * (ref - other)).sum(-1)
-
-
-def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """95% Wilson score interval for a binomial proportion k/n."""
-    if n == 0:
-        return math.nan, math.nan
-    p = k / n
-    denom = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / denom
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
-def select_direction(rows: list[dict[str, Any]], max_kl: float) -> tuple[dict[str, Any], bool]:
-    """Arditi et al. selection: min bypass score among candidates that (a) induce refusal on
-    harmless when added and (b) barely change harmless outputs when ablated.
-
-    Returns (row, filters_passed). If nothing induces refusal, falls back to the KL filter
-    alone; never drops it: a direction that breaks the model also "bypasses refusal".
-    """
-    low_kl = [r for r in rows if r["kl"] < max_kl]
-    if not low_kl:
-        raise ValueError(f"no candidate has KL < {max_kl}: every ablation breaks the model")
-    ok = [r for r in low_kl if r["induce_score"] > 0]
-    best = min(ok or low_kl, key=lambda r: r["bypass_score"])
-    return best, bool(ok)
-
-
-def rate(labels: list[Any], target: Any) -> dict[str, Any]:
-    """k/n with Wilson CI. Missing (None) labels stay in n: a failure to judge isn't a pass."""
-    n, k = len(labels), sum(lab == target for lab in labels)
-    lo, hi = wilson(k, n)
-    return {"k": k, "n": n, "rate": k / n if n else math.nan, "ci95": [lo, hi]}
-
-
-def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Per condition (prompt_set/intervention/vector): judge-label rates, substring refusal
-    rate and mean logit refusal score. Random seeds are also pooled as `random*`."""
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in rows:
-        key = f"{r['prompt_set']}/{r['intervention']}/{r['vector']}"
-        groups[key].append(r)
-        if r["vector"].startswith("random_"):
-            groups[f"{r['prompt_set']}/{r['intervention']}/random*"].append(r)
-    out: dict[str, Any] = {}
-    for key, rs in sorted(groups.items()):
-        s: dict[str, Any] = {
-            "substring_refusal": rate([r["substring_refusal"] for r in rs], True),
-            "mean_refusal_score": sum(r["refusal_score"] for r in rs) / len(rs),
-        }
-        if "label" in rs[0]:
-            labels = [r["label"] for r in rs]
-            s |= {lab: rate(labels, lab) for lab in LABELS}
-            s["judge_missing"] = sum(lab is None for lab in labels)
-        out[key] = s
-    return out
-
-
-# ---- experiment -------------------------------------------------------------------------
+# Every split prepare_data.py writes. Contrast sets back the contrast control.
+TRAIN_SETS = ("harmful_train", "harmless_train")
+VAL_SETS = ("harmful_val", "harmless_val")
+TEST_SETS = ("harmful_test", "harmless_test")
+CONTRAST_SETS = ("contrast_question", "contrast_imperative")
+ALL_SETS = (*TRAIN_SETS, *VAL_SETS, *TEST_SETS, *CONTRAST_SETS)
 
 
 class RefusalDirectionExperiment(Experiment):
+    # ---- configuration-derived state (built once, on first use) -------------------------
+
     def judge_kwargs(self) -> dict[str, Any]:
         return {"rubric": load_judge_rubric(), "labels": LABELS}
 
-    def run(self) -> dict[str, Any]:
-        p, m = self.params, self.imodel
-        self.data = {
-            name: JsonlTask(f"{p['data_dir']}/{name}.jsonl").load()
-            for name in SETS
-            if Path(f"{p['data_dir']}/{name}.jsonl").exists()
+    @cached_property
+    def data(self) -> dict[str, list[Example]]:
+        data_dir = Path(self.params["data_dir"])
+        missing = [name for name in ALL_SETS if not (data_dir / f"{name}.jsonl").exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"missing splits in {data_dir}: {missing} — run prepare_data.py first"
+            )
+        return {name: JsonlTask(str(data_dir / f"{name}.jsonl")).load() for name in ALL_SETS}
+
+    @cached_property
+    def prompts(self) -> dict[str, list[str]]:
+        """Chat-formatted prompt strings per split — exactly what the model is fed."""
+        return {
+            name: [self.imodel.format_chat(ex.messages) for ex in examples]
+            for name, examples in self.data.items()
         }
-        self.prompts = {
-            k: [m.format_chat(ex.messages) for ex in exs] for k, exs in self.data.items()
-        }
-        self.refusal_ids = self._refusal_token_ids(p["refusal_tokens"])
-        self.positions: list[int] = list(p["positions"])
-        self._log_positions()
 
-        summary: dict[str, Any] = {"model": self.cfg.model.name, "num_layers": m.num_layers}
-        stages = p["stages"]
-        if "baseline" in stages:
-            summary["baseline"] = self._baseline()
+    @cached_property
+    def positions(self) -> list[int]:
+        return list(self.params["positions"])
 
-        dirs = self._directions()  # [L, P, d]
-        layer, pos = p["layer"], p["pos"]
-        if "sweep" in stages:
-            sel = self._sweep(dirs)
-            summary["sweep"] = sel
-            layer, pos = sel["layer"], sel["pos"]
-        if layer is None or pos is None:
-            raise ValueError("set params.layer and params.pos, or run the `sweep` stage")
-        r = dirs[layer, self.positions.index(pos)]
-        self.save_tensor("direction.pt", r)
-        summary["direction"] = {"layer": layer, "pos": pos, "norm": r.norm().item()}
-
-        alpha = p["alpha"]
-        if "alpha" in stages:
-            summary["alpha"] = self._alpha_sweep(r, layer)
-            alpha = summary["alpha"]["chosen"]
-        summary["direction"]["alpha"] = alpha
-
-        if "eval" in stages:
-            summary["eval"] = self._eval(r, layer, pos, alpha)
-        return summary
-
-    # ---- helpers ------------------------------------------------------------------------
-
-    def _refusal_token_ids(self, tokens: list[str]) -> list[int]:
+    @cached_property
+    def refusal_token_ids(self) -> list[int]:
+        """Single-token refusal openers; the logit proxy is their summed probability."""
         ids = []
-        for t in tokens:
-            enc = self.imodel.tokenizer(t, add_special_tokens=False)["input_ids"]
-            if len(enc) != 1:
-                raise ValueError(f"refusal token {t!r} is not a single token: {enc}")
-            ids.append(enc[0])
+        for token in self.params["refusal_tokens"]:
+            encoded = self.imodel.tokenizer(token, add_special_tokens=False)["input_ids"]
+            if len(encoded) != 1:
+                raise ValueError(f"refusal token {token!r} is not a single token: {encoded}")
+            ids.append(encoded[0])
         return ids
 
-    def _log_positions(self) -> None:
-        """The candidate positions are template-specific: log what they are on this model."""
-        tok = self.imodel.tokenizer
-        ids = tok(self.prompts["harmful_train"][0], add_special_tokens=False)["input_ids"]
-        decoded = {pos: tok.decode([ids[pos]]) for pos in self.positions}
-        self.log.info(f"candidate positions: {decoded}")
+    @cached_property
+    def direction_grid(self) -> torch.Tensor:
+        """mean-diff direction per (layer, position): [num_layers, n_positions, d]."""
+        sites = [self.site(layer) for layer in range(self.imodel.num_layers)]
+        grid = vec.build_direction_grid(
+            self.imodel,
+            self.prompts["harmful_train"],
+            self.prompts["harmless_train"],
+            sites,
+            self.positions,
+            self.params["batch_size"],
+        )
+        self.save_tensor("directions.pt", grid)
+        return grid
 
-    def _site(self, layer: int) -> Site:
+    # ---- intervention and model plumbing -------------------------------------------------
+
+    def site(self, layer: int) -> Site:
         return Site(self.params["site_kind"], layer)
 
-    def _ablate(self, r: torch.Tensor) -> DirectionalAblation:
-        return DirectionalAblation.everywhere(r, self.imodel.num_layers)
+    def ablation(self, direction: torch.Tensor) -> DirectionalAblation:
+        """Remove the direction from embed and every attn/mlp output, so no component can
+        write it back into the residual stream at a later layer."""
+        return DirectionalAblation.everywhere(direction, self.imodel.num_layers)
 
-    def _add(self, r: torch.Tensor, layer: int, alpha: float) -> AddVector:
-        # All positions, incl. generated tokens (interventions run at every decode step).
-        return AddVector(r, [self._site(layer)], scale=alpha)
+    def addition(self, direction: torch.Tensor, layer: int, alpha: float) -> AddVector:
+        """Add at one layer, every position — including generated tokens, since interventions
+        re-run at each decode step. Steering only the prompt washes out during generation."""
+        return AddVector(direction, [self.site(layer)], scale=alpha)
 
-    def _last_logits(
-        self, prompts: list[str], interventions: list[Intervention] | tuple = ()
+    def next_token_logits(
+        self, prompts: Sequence[str], interventions: Sequence[Intervention] = ()
     ) -> torch.Tensor:
-        lg = self.imodel.logits(
+        """Logits for the first generated token: [n_prompts, vocab]."""
+        logits = self.imodel.logits(
             prompts, interventions, positions=[-1], batch_size=self.params["batch_size"]
         )
-        return lg[:, 0]
+        return logits[:, 0]
 
-    def _judge(self, rows: list[dict[str, Any]]) -> None:
-        if self.cfg.judge is None:
-            return
-        results = self.judge.judge([JudgeInput(r["prompt"], r["completion"]) for r in rows])
-        for r, j in zip(rows, results, strict=True):
-            r["label"], r["judge_reasoning"] = j.label, j.reasoning
-            if j.label is None:
-                r["judge_error"] = j.meta.get("error", "unparseable output")
-        errors = Counter(r["judge_error"] for r in rows if "judge_error" in r)
-        if not errors:
-            return
-        n_missing = sum(errors.values())
-        # Missing labels count as "not refusal": an all-failed judge silently zeroes every
-        # rate (and the alpha stage would then pick on noise), so stop the run instead.
-        if n_missing == len(rows):
-            raise RuntimeError(f"judge failed on all {len(rows)} rows: {errors.most_common(3)}")
-        self.log.warning(f"judge missing {n_missing}/{len(rows)} labels: {errors.most_common(3)}")
+    def log_candidate_positions(self) -> None:
+        """Candidate positions are chat-template specific; log what they actually are here."""
+        tokenizer = self.imodel.tokenizer
+        ids = tokenizer(self.prompts["harmful_train"][0], add_special_tokens=False)["input_ids"]
+        decoded = {pos: tokenizer.decode([ids[pos]]) for pos in self.positions}
+        self.log.info(f"candidate positions: {decoded}")
 
-    def _generate(
+    # ---- one condition -------------------------------------------------------------------
+
+    def run_condition(
         self,
-        set_name: str,
-        interventions: list[Intervention],
-        intervention: str,
-        vector: str,
-        **extra: Any,
-    ) -> list[dict[str, Any]]:
-        """Generations + logit refusal score + substring refusal for one condition."""
-        prompts = self.prompts[set_name]
-        outs = self.imodel.generate(prompts, self.cfg.generation, interventions=interventions)
-        scores = refusal_score(self._last_logits(prompts, interventions), self.refusal_ids)
-        exs = self.data[set_name]
-        subs = SubstringJudge().judge(
-            [JudgeInput(ex.user_text, o) for ex, o in zip(exs, outs, strict=True)]
+        split: str,
+        interventions: Sequence[Intervention],
+        *,
+        intervention_name: str,
+        vector_name: str,
+        alpha: float | None = None,
+    ) -> list[GenerationRow]:
+        """Generate under one condition and score it with the two cheap metrics."""
+        prompts, examples = self.prompts[split], self.data[split]
+        completions = self.imodel.generate(
+            prompts, self.cfg.generation, interventions=list(interventions)
+        )
+        scores = refusal_score(
+            self.next_token_logits(prompts, interventions), self.refusal_token_ids
+        )
+        substring = SubstringJudge().judge(
+            [JudgeInput(ex.user_text, c) for ex, c in zip(examples, completions, strict=True)]
         )
         return [
-            {
-                "id": ex.id,
-                "prompt_set": set_name.split("_")[0],
-                "intervention": intervention,
-                "vector": vector,
-                **extra,
-                "prompt": ex.user_text,
-                "completion": o,
-                "refusal_score": s.item(),
-                "substring_refusal": sj.label == "yes",
-            }
-            for ex, o, s, sj in zip(exs, outs, scores, subs, strict=True)
+            GenerationRow(
+                id=example.id,
+                prompt_set=split.split("_")[0],
+                intervention=intervention_name,
+                vector=vector_name,
+                alpha=alpha,
+                prompt=example.user_text,
+                completion=completion,
+                refusal_score=score.item(),
+                substring_refusal=marker.label == "yes",
+            )
+            for example, completion, score, marker in zip(
+                examples, completions, scores, substring, strict=True
+            )
         ]
 
-    # ---- stages -------------------------------------------------------------------------
-
-    def _baseline(self) -> dict[str, Any]:
-        rows = []
-        for set_name in ("harmful_val", "harmless_val"):
-            rows += self._generate(set_name, [], "none", "-")
-        self._judge(rows)
-        self.save_jsonl("baseline_val.jsonl", rows)
-        summ = summarize(rows)
-
-        key = "refusal" if self.cfg.judge is not None else "substring_refusal"
-        harmful = summ["harmful/none/-"][key]["rate"]
-        if harmful < self.params["min_baseline_refusal"]:
+    def judge_rows(self, rows: Sequence[GenerationRow]) -> None:
+        """Label rows in place, if a judge is configured; warn about partial failures."""
+        if self.cfg.judge is None:
+            return
+        errors = apply_judge(self.judge, rows)
+        if errors:
             self.log.warning(
-                f"baseline harmful refusal {harmful:.2f} < {self.params['min_baseline_refusal']}: "
+                f"judge missing {sum(errors.values())}/{len(rows)} labels: {errors.most_common(3)}"
+            )
+
+    def save_rows(self, name: str, rows: Sequence[GenerationRow]) -> None:
+        self.save_jsonl(name, [row.to_dict() for row in rows])
+
+    # ---- stages --------------------------------------------------------------------------
+
+    @cached_property
+    def stages(self) -> list[Stage]:
+        return Stage.parse_all(self.params["stages"])
+
+    def pinned_site(self) -> tuple[int, int] | None:
+        """(layer, position) fixed in the config, letting a run skip the sweep."""
+        layer, pos = self.params["layer"], self.params["pos"]
+        return None if layer is None or pos is None else (layer, pos)
+
+    def run(self) -> dict[str, Any]:
+        """baseline and eval measure; sweep and alpha decide. `select` holds the decisions."""
+        self.log_candidate_positions()
+        report: dict[str, Any] = {
+            "model": self.cfg.model.name,
+            "num_layers": self.imodel.num_layers,
+        }
+        if Stage.BASELINE in self.stages:
+            report["baseline"] = self.stage_baseline()
+
+        selection = self.select(report)
+        self.save_tensor("direction.pt", selection.direction)
+        report["direction"] = selection.to_dict()
+
+        if Stage.EVAL in self.stages:
+            report["eval"] = self.stage_eval(selection)
+        return report
+
+    def select(self, report: dict[str, Any]) -> Selection:
+        """Resolve (layer, position, alpha) by running the selection stages that are enabled.
+
+        A stage that does not run falls back to the value pinned in the config, which is how
+        a later run reuses an earlier sweep instead of repeating it. Each stage writes its own
+        evidence into `report`.
+        """
+        site = self.pinned_site()
+        if Stage.SWEEP in self.stages:
+            sweep = self.stage_sweep()
+            report["sweep"], site = sweep.to_dict(), (sweep.best.layer, sweep.best.pos)
+        if site is None:
+            raise ValueError("set params.layer and params.pos, or run the `sweep` stage")
+        layer, pos = site
+        direction = self.direction_grid[layer, self.positions.index(pos)]
+
+        alpha = self.params["alpha"]
+        if Stage.ALPHA in self.stages:
+            chosen = self.stage_alpha(direction, layer)
+            report["alpha"], alpha = chosen.to_dict(), chosen.chosen
+        return Selection(layer=layer, pos=pos, alpha=alpha, direction=direction)
+
+    def stage_baseline(self) -> dict[str, Any]:
+        """No intervention on val: is there enough refusal for ablation to have a target?"""
+        rows = [row for split in VAL_SETS for row in self.condition_none(split)]
+        self.judge_rows(rows)
+        self.save_rows("baseline_val.jsonl", rows)
+
+        report = summarize(rows)
+        metric = "refusal" if self.cfg.judge is not None else "substring_refusal"
+        observed = report[condition_key("harmful", "none", "-")][metric]["rate"]
+        floor = self.params["min_baseline_refusal"]
+        if observed < floor:
+            self.log.warning(
+                f"baseline harmful refusal {observed:.2f} < {floor}: "
                 "too little refusal for ablation results to mean much"
             )
-        return summ
+        return report
 
-    def _directions(self) -> torch.Tensor:
-        m = self.imodel
-        sites = [self._site(layer) for layer in range(m.num_layers)]
-        acts = {
-            k: m.activations(
-                self.prompts[k],
-                sites,
-                positions=self.positions,
-                batch_size=self.params["batch_size"],
-            )
-            for k in ("harmful_train", "harmless_train")
-        }
-        dirs = torch.stack(
-            [mean_diff(acts["harmful_train"][s], acts["harmless_train"][s]) for s in sites]
-        )
-        self.save_tensor("directions.pt", dirs)
-        return dirs
+    def condition_none(self, split: str) -> list[GenerationRow]:
+        return self.run_condition(split, [], intervention_name="none", vector_name="-")
 
-    def _sweep(self, dirs: torch.Tensor) -> dict[str, Any]:
-        m, cfg = self.imodel, self.params["sweep"]
+    def stage_sweep(self) -> SweepResult:
+        """Score every (layer, position) candidate on val using the logit proxy only.
+
+        Generating and judging all candidates would cost ~190k generations; this is one
+        forward pass per prompt per candidate.
+        """
         harmful, harmless = self.prompts["harmful_val"], self.prompts["harmless_val"]
-        clean_harmful = refusal_score(self._last_logits(harmful), self.refusal_ids).mean().item()
-        clean_harmless_logits = self._last_logits(harmless)
-        clean_harmless = refusal_score(clean_harmless_logits, self.refusal_ids).mean().item()
-        self.log.info(
-            f"clean refusal score: harmful={clean_harmful:.2f} harmless={clean_harmless:.2f}"
+        clean_harmless_logits = self.next_token_logits(harmless)
+        clean = {
+            "harmful": refusal_score(
+                self.next_token_logits(harmful), self.refusal_token_ids
+            ).mean().item(),
+            "harmless": refusal_score(clean_harmless_logits, self.refusal_token_ids).mean().item(),
+        }  # fmt: skip
+        self.log.info(f"clean refusal score: {clean}")
+
+        candidates = self.sweep_candidates(harmful, harmless, clean_harmless_logits)
+        self.save_jsonl("sweep.jsonl", [c.to_dict() for c in candidates])
+
+        best, induce_passed = select_direction(candidates, self.params["sweep"]["max_kl"])
+        if not induce_passed:
+            self.log.warning("no candidate induces refusal; using min bypass among low-KL ones")
+        return SweepResult(
+            best=best,
+            induce_filter_passed=induce_passed,
+            clean_refusal_score=clean,
+            candidates=candidates,
         )
 
-        n_layers = math.floor(cfg["max_layer_frac"] * m.num_layers)
-        rows = []
-        for layer in range(n_layers):
-            for pi, pos in enumerate(self.positions):
-                r = dirs[layer, pi]
-                # Layer-0 input at template positions is the same token embedding for every
-                # prompt, so the mean-diff is exactly zero: no candidate there.
-                if r.norm() <= 1e-6:
+    def sweep_candidates(
+        self,
+        harmful: Sequence[str],
+        harmless: Sequence[str],
+        clean_harmless_logits: torch.Tensor,
+    ) -> list[SweepCandidate]:
+        """Score the (layer, position) grid. Late layers are skipped: they mostly write
+        straight to the unembedding, where "removing refusal" says little about mediation."""
+        num_layers = self.imodel.num_layers
+        max_layer = math.floor(self.params["sweep"]["max_layer_frac"] * num_layers)
+        candidates: list[SweepCandidate] = []
+        for layer in range(max_layer):
+            for index, pos in enumerate(self.positions):
+                direction = self.direction_grid[layer, index]
+                if vec.is_degenerate(direction):
                     self.log.info(f"skip layer {layer} pos {pos}: zero-norm direction")
                     continue
-                abl = self._last_logits(harmful + harmless, [self._ablate(r)])
-                abl_harmful, abl_harmless = abl[: len(harmful)], abl[len(harmful) :]
-                add = self._last_logits(harmless, [self._add(r, layer, 1.0)])
-                rows.append(
-                    {
-                        "layer": layer,
-                        "pos": pos,
-                        "layer_frac": layer / m.num_layers,
-                        "norm": r.norm().item(),
-                        "bypass_score": refusal_score(abl_harmful, self.refusal_ids).mean().item(),
-                        "induce_score": refusal_score(add, self.refusal_ids).mean().item(),
-                        "kl": kl_div(clean_harmless_logits, abl_harmless).mean().item(),
-                    }
+                candidates.append(
+                    self.score_candidate(
+                        direction, layer, pos, harmful, harmless, clean_harmless_logits
+                    )
                 )
-            if rows:
-                best = min(rows, key=lambda r: r["bypass_score"])
-                self.log.info(f"sweep layer {layer}/{n_layers - 1} done; best so far {best}")
-        self.save_jsonl("sweep.jsonl", rows)
+            if candidates:
+                best = min(candidates, key=lambda c: c.bypass_score)
+                self.log.info(
+                    f"sweep layer {layer}/{max_layer - 1} done; best so far "
+                    f"layer {best.layer} pos {best.pos} bypass {best.bypass_score:.2f}"
+                )
+        return candidates
 
-        sel, passed = select_direction(rows, cfg["max_kl"])
-        if not passed:
-            self.log.warning("no candidate induces refusal; using min bypass among low-KL ones")
-        return {
-            **sel,
-            "filters_passed": passed,
-            "clean_refusal_score": {"harmful": clean_harmful, "harmless": clean_harmless},
-        }
-
-    def _alpha_sweep(self, r: torch.Tensor, layer: int) -> dict[str, Any]:
-        rows = []
-        for alpha in self.params["alphas"]:
-            rows += self._generate(
-                "harmless_val", [self._add(r, layer, alpha)], "add", "r", alpha=alpha
-            )
-        self._judge(rows)
-        self.save_jsonl("alpha_val.jsonl", rows)
-
-        per_alpha = {
-            a: summarize([r for r in rows if r["alpha"] == a])["harmless/add/r"]
-            for a in self.params["alphas"]
-        }
-        chosen = self.params["alpha"]
-        if self.cfg.judge is None:
-            self.log.warning(
-                "alpha stage without a judge: keeping params.alpha (no incoherence check)"
-            )
-        else:
-            ok = [
-                a for a, s in per_alpha.items()
-                if s["incoherent"]["rate"] <= self.params["max_incoherent"]
-            ]  # fmt: skip
-            if ok:  # highest refusal; ties -> smallest alpha (least off-distribution)
-                chosen = max(ok, key=lambda a: (per_alpha[a]["refusal"]["rate"], -a))
-            else:
-                self.log.warning("every alpha exceeds max_incoherent; keeping params.alpha")
-        return {"chosen": chosen, "per_alpha": per_alpha}
-
-    def _eval(self, r: torch.Tensor, layer: int, pos: int, alpha: float) -> dict[str, Any]:
-        m = self.imodel
-        site = self._site(layer)
-        contrast = {
-            k: m.activations(self.prompts[k], [site], positions=[pos])[site][:, 0]
-            for k in ("contrast_question", "contrast_imperative")
-        }
-        # Same construction as r, from a contrast with no refusal; scaled to |r| for addition.
-        c = (
-            unit(mean_diff(contrast["contrast_question"], contrast["contrast_imperative"]))
-            * r.norm()
+    def score_candidate(
+        self,
+        direction: torch.Tensor,
+        layer: int,
+        pos: int,
+        harmful: Sequence[str],
+        harmless: Sequence[str],
+        clean_harmless_logits: torch.Tensor,
+    ) -> SweepCandidate:
+        # One batched pass for both splits, then split the rows back apart.
+        ablated = self.next_token_logits([*harmful, *harmless], [self.ablation(direction)])
+        ablated_harmful, ablated_harmless = ablated[: len(harmful)], ablated[len(harmful) :]
+        added = self.next_token_logits(harmless, [self.addition(direction, layer, 1.0)])
+        return SweepCandidate(
+            layer=layer,
+            pos=pos,
+            layer_frac=layer / self.imodel.num_layers,
+            norm=direction.norm().item(),
+            bypass_score=refusal_score(ablated_harmful, self.refusal_token_ids).mean().item(),
+            induce_score=refusal_score(added, self.refusal_token_ids).mean().item(),
+            kl=kl_div(clean_harmless_logits, ablated_harmless).mean().item(),
         )
-        vectors = {"r": r, "contrast": c} | {
-            f"random_{s}": random_like(r, seed=s) for s in range(self.params["n_random"])
+
+    def stage_alpha(self, direction: torch.Tensor, layer: int) -> AlphaResult:
+        """Pick the addition scale on harmless val: most refusal, subject to staying coherent."""
+        rows = [
+            row
+            for alpha in self.params["alphas"]
+            for row in self.run_condition(
+                "harmless_val",
+                [self.addition(direction, layer, alpha)],
+                intervention_name="add",
+                vector_name="r",
+                alpha=alpha,
+            )
+        ]
+        self.judge_rows(rows)
+        self.save_rows("alpha_val.jsonl", rows)
+
+        key = condition_key("harmless", "add", "r")
+        per_alpha = {
+            alpha: summarize([r for r in rows if r.alpha == alpha])[key]
+            for alpha in self.params["alphas"]
         }
-        self.save_tensor("eval_vectors.pt", torch.stack(list(vectors.values())))
+        return AlphaResult(chosen=self.choose_alpha(per_alpha), per_alpha=per_alpha)
 
-        diag = self._diagnostics(vectors, site, pos)
-        self.log.info(f"diagnostics: {diag}")
+    def choose_alpha(self, per_alpha: dict[float, dict[str, Any]]) -> float:
+        """Highest refusal among coherent scales; ties go to the smallest (least off-distribution).
 
-        rows = self._generate("harmful_test", [], "none", "-")
-        rows += self._generate("harmless_test", [], "none", "-")
-        for name, v in vectors.items():
-            rows += self._generate("harmful_test", [self._ablate(v)], "ablate", name)
-            rows += self._generate("harmless_test", [self._add(v, layer, alpha)], "add", name)
-        # Side effects: ablating r should leave harmless behaviour intact.
-        rows += self._generate("harmless_test", [self._ablate(r)], "ablate", "r")
-        self._judge(rows)
-        self.save_jsonl("eval_test.jsonl", rows)
-        return {"diagnostics": diag, "conditions": summarize(rows)}
+        Without a judge there is no incoherence signal, and a large scale that destroys the
+        model looks like a win — so fall back to the configured alpha instead of guessing.
+        """
+        if self.cfg.judge is None:
+            self.log.warning("alpha stage without a judge: keeping params.alpha")
+            return self.params["alpha"]
+        coherent = [
+            alpha
+            for alpha, report in per_alpha.items()
+            if report["incoherent"]["rate"] <= self.params["max_incoherent"]
+        ]
+        if not coherent:
+            self.log.warning("every alpha exceeds max_incoherent; keeping params.alpha")
+            return self.params["alpha"]
+        return max(coherent, key=lambda a: (per_alpha[a]["refusal"]["rate"], -a))
 
-    def _diagnostics(
-        self, vectors: dict[str, torch.Tensor], site: Site, pos: int
-    ) -> dict[str, Any]:
-        """Share of ||h||² each vector's ablation removes at the chosen site (test prompts),
-        and cosine to r: a control that removes ~nothing is a trivially passed control."""
-        m = self.imodel
-        out: dict[str, Any] = {}
-        for k in ("harmful_test", "harmless_test"):
-            h = m.activations(self.prompts[k], [site], positions=[pos])[site][:, 0].float()
-            out[f"frac_removed/{k}"] = {
-                name: ((h @ unit(v.float())) ** 2 / h.pow(2).sum(-1)).mean().item()
-                for name, v in vectors.items()
-            }
-        out["cos_to_r"] = {
-            name: torch.nn.functional.cosine_similarity(
-                v.float(), vectors["r"].float(), dim=0
-            ).item()
-            for name, v in vectors.items()
+    def stage_eval(self, selection: Selection) -> dict[str, Any]:
+        """Test set: both causal tests for `r` and for every control, plus side effects."""
+        direction, layer, pos = selection.direction, selection.layer, selection.pos
+        site = self.site(layer)
+        all_vectors = vec.control_vectors(direction, self.params["n_random"]) | {
+            "contrast": vec.contrast_direction(
+                self.imodel,
+                self.prompts["contrast_question"],
+                self.prompts["contrast_imperative"],
+                site,
+                pos,
+                direction.norm().item(),
+            )
         }
-        return out
+        self.save_tensor("eval_vectors.pt", torch.stack(list(all_vectors.values())))
+
+        diagnostics = vec.ablation_diagnostics(
+            self.imodel, all_vectors, {s: self.prompts[s] for s in TEST_SETS}, site, pos
+        )
+        self.log.info(f"diagnostics: {diagnostics}")
+
+        rows = [row for split in TEST_SETS for row in self.condition_none(split)]
+        for name, vector in all_vectors.items():
+            # Necessity on harmful, sufficiency on harmless.
+            rows += self.run_condition(
+                "harmful_test",
+                [self.ablation(vector)],
+                intervention_name="ablate",
+                vector_name=name,
+            )
+            rows += self.run_condition(
+                "harmless_test",
+                [self.addition(vector, layer, selection.alpha)],
+                intervention_name="add",
+                vector_name=name,
+            )
+        # Side effects: ablating r must leave harmless behaviour intact.
+        rows += self.run_condition(
+            "harmless_test", [self.ablation(direction)], intervention_name="ablate", vector_name="r"
+        )
+        self.judge_rows(rows)
+        self.save_rows("eval_test.jsonl", rows)
+        return {"diagnostics": diagnostics, "conditions": summarize(rows)}
