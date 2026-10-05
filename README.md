@@ -1,139 +1,155 @@
-# interptemp
+# interp-refdir
 
-Template for fast mech-interp experiments: generation, activations, interventions
-(steering / ablation), and LLM judges — backend- and model-agnostic, with sanity checks
-built in. Default stack: [nnterp](https://github.com/Butanium/nnterp) (nnsight) + Qwen3 +
-OpenRouter, managed with `uv`.
+**Refusal in a chat model is mediated by a single direction.** A replication of
+[Arditi et al. 2024](https://arxiv.org/abs/2406.11717) on Qwen3-4B, with two families of
+control vectors and an LLM judge validated against blind hand labels.
 
-## Results
+One direction `r` in the residual stream — the difference in mean activation between harmful
+and harmless instructions — controls refusal in both directions. Removing it makes the model
+answer requests it otherwise declines; adding it makes the model refuse to suggest smoothie
+ingredients. Neither effect appears for control vectors.
 
-### Refusal is mediated by a single direction (Qwen3-4B)
+## Result
 
-A replication of [Arditi et al. 2024](https://arxiv.org/abs/2406.11717) — full write-up,
-method and caveats in [`experiments/refusal_direction/`](experiments/refusal_direction/).
+Held-out test prompts, judge-labeled, n=64 per condition (random controls pooled over 5
+seeds), Wilson 95% intervals. Direction read from layer 21 of 36, at the post-instruction
+token:
 
-A single mean-diff direction `r`, read off layer 21 at the post-instruction token, controls
-refusal in both directions on held-out test prompts. Judge-labeled, n=64 per condition,
-Wilson 95% CIs:
-
-| Test condition | Ablate `r` on harmful | Add `r` on harmless |
+| Test condition | Ablate on harmful | Add on harmless |
 |---|---|---|
 | no intervention | 86% [75–92] refusal | 0% [0–6] refusal |
 | **`r`** | **5% [2–13]** | **98% [92–100]** |
 | 5 norm-matched random vectors | 88% [84–91] | 0% [0–1] |
 | contrast-direction control | 88% [77–94] | 2% [0–8] |
 
-Removing `r` strips 15.3% of ‖h‖² on harmful prompts but 0.25% on harmless ones, and leaves
-harmless behaviour untouched (64/64 compliance). Neither control family moves either number.
-
 ![test conditions](experiments/refusal_direction/results/qwen3-4b/conditions.png)
 
-The effect is confined to layers 20–23; every other layer stays within the no-intervention
-interval. The lower panel is the side-effect guard (KL on harmless prompts) that keeps the
-sweep from "removing refusal" by simply breaking the model:
+- **Necessity and sufficiency both hold**, with intervals that do not overlap either control.
+- **No collateral damage:** ablating `r` on harmless prompts leaves 64/64 compliance, and the
+  judge labels one response in 1088 as incoherent.
+- **Specific to harmfulness:** ablation strips 15.3% of ‖h‖² on harmful prompts but 0.25% on
+  harmless ones. Random directions remove ~0.01% (≈ 1/d, as theory predicts for an isotropic
+  direction); the contrast control removes 0.8%, with `cos(contrast, r) = 0.07`.
+
+The effect is confined to layers 20–23. The lower panel is the side-effect guard — KL between
+the clean and ablated next-token distributions on harmless prompts — which stops the sweep
+from "removing refusal" by simply breaking the model:
 
 ![layer sweep](experiments/refusal_direction/results/qwen3-4b/layers.png)
 
-The judge was validated at κ = 0.93 against blind hand labels before any of these rates were
-reported. **One model is not a replication** — reproducing this on Qwen3-8B is the main open
-item, along with disentangling "harmful" from "topic" in the training contrast.
+Full method, diagnostics and caveats:
+[`experiments/refusal_direction/`](experiments/refusal_direction/).
 
-## Status
+## Method in brief
 
-Early and lightly tested — please open an issue if something breaks.
-
-| Component | Tested |
+| | |
 |---|---|
-| nnterp backend, interventions, sanity checks | ✅ end-to-end on Qwen3-0.6B (CPU); unit + integration tests |
-| LLM judge via OpenRouter (Gemini, Claude Haiku) | ✅ real API runs |
-| Blind labeling CLI | ✅ manual use |
-| GPU / Qwen3-8B, `make sanity` on a pod | ❌ not yet |
-| vLLM backend (`envs/vllm`) | ❌ never run |
-| Gemma config, `infra/setup_pod.sh` | ❌ not yet |
+| Data | Arditi et al.'s splits: 128+128 train (direction only), 32+32 val (all selection), 64+64 test (reported numbers), deduplicated |
+| Direction | `mean(harmful) − mean(harmless)` at the input of layer *l*, position *p* |
+| Selection | 9 post-instruction positions × layers below 0.8·L, scored on val with a one-forward-pass logit proxy |
+| Ablation | `h − (h·r̂)r̂` at embed and every attn/mlp output, so no component can write `r` back at a later layer |
+| Addition | `h + α·r` at one layer, every position including generated tokens |
+| Controls | 5 norm-matched random vectors; a *contrast* direction built the same way from a harmless contrast with no refusal in it |
+| Metrics | LLM judge (`refusal` / `compliance` / `incoherent`), validated at κ = 0.93 on 61 blind hand labels |
 
-## Quickstart
+Train is AdvBench/TDC/HarmBench, test is mostly JailbreakBench — so the reported numbers also
+show the direction transferring across prompt sources.
+
+## Three things that would have produced a wrong answer
+
+Each of these bit during the work, and each is now a guard in the code:
+
+- **"Refusal is gone" also describes a broken model.** An early run picked a direction with
+  KL = 15 on harmless prompts: it destroyed the model, which indeed stopped refusing. The KL
+  filter is now never dropped, and `incoherent` is a separate judge label — at α=4 the model
+  degenerates to 100% incoherent, which a refusal-only metric reads as "no effect".
+- **A judge that fails silently zeroes every rate.** One full run produced all-`None` labels,
+  so the α stage tuned on noise and reported 19% instead of 98%. A judge that fails on every
+  row now aborts the run; partial failures count as non-refusal and are reported.
+- **A control that removes nothing is not a control.** Random ablation removes ~1/d of the
+  activation norm, so "random didn't break refusal" is near-trivial. Hence the second,
+  harder control built by the same mean-diff construction.
+
+## Reproducing
 
 ```bash
-make install                 # uv sync + pre-commit hooks
-cp .env.example .env         # OPENROUTER_API_KEY, HF_TOKEN
-make test                    # unit tests, no model (seconds)
-make test-model              # integration tests on Qwen3-0.6B, CPU ok (~1-2 min)
+make install                      # uv sync + pre-commit hooks
+cp .env.example .env              # OPENROUTER_API_KEY (judge), HF_TOKEN
+make check                        # lint, types, unit tests
+make sanity model=configs/models/qwen3-4b.yaml   # must pass on any new model or machine
 
-# Any experiment = one config. Swap model / override anything from the CLI:
+uv run python experiments/refusal_direction/prepare_data.py
 uv run interp-run experiments/refusal_direction/config.yaml \
-    model=configs/models/qwen3-0.6b.yaml judge=null generation.max_new_tokens=16
+    model=configs/models/qwen3-4b.yaml model.device_map=mps
+uv run python experiments/refusal_direction/plot_layers.py outputs/refusal_direction/<run>
 ```
 
-Each run writes `outputs/<name>/<timestamp>/` with the resolved `config.yaml`, `meta.json`
-(git sha + dirty flag), results, and `summary.json`.
+About 45 minutes end to end on an M5 (Qwen3-4B, bf16, MPS). Every run writes
+`outputs/<name>/<timestamp>/` with the resolved config, git sha, generations and
+`summary.json`. Stages are selectable, so a later run can reuse an earlier sweep:
+`'params.stages=[baseline,alpha,eval]' params.layer=21 params.pos=-9`.
 
-## GPU box (Sesterce / Runpod / Vast)
+Judge validation is a separate, manual step — see the experiment README.
 
-1. Rent **1× H100 80GB** (or A100 80GB). Qwen3-8B bf16 ≈ 16 GB weights; the rest is KV cache
-   for long CoT, cached activations, and the 2nd weight copy used by the HF-parity check.
-   Attach a persistent volume if available (mount at `/workspace`).
-2. `git clone <repo> /workspace/<proj> && cd /workspace/<proj> && bash infra/setup_pod.sh`
-   (`WITH_VLLM=1` to also build the vLLM env, `MODEL=...` to prefetch another model).
-3. Connect from Cursor / VS Code via Remote-SSH.
-4. `make sanity` — **all checks must pass before any experiment on a new model/pod.**
-5. Stop the instance when idle. Code lives in git; pull results with
-   `rsync -avz <host>:/workspace/<proj>/outputs/ outputs/`.
+### Larger models
+
+Qwen3-8B needs a 48 GB GPU (1× L40S or A6000; `make sanity` loads a second copy of the
+weights for its HF-parity check). `bash infra/setup_pod.sh` bootstraps a pod; pull results
+back with `rsync -avz <host>:/workspace/<proj>/outputs/ outputs/`.
+
+Qwen3-0.6B and 1.7B are **not** usable here: they refuse ~0/32 and 7/32 harmful prompts with
+no intervention, so ablation has nothing to remove. They are still fine for smoke runs.
 
 ## Layout
 
 ```
-src/interptemp/
-  sites.py          Site("resid_post", 12): backend-agnostic hook points, execution-ordered
-  interventions.py  Intervention ABC; AddVector, DirectionalAblation(.everywhere), Lambda
-  directions.py     mean_diff, random_like (norm-matched control), project, cosine
-  models/           Generator ABC (text only) -> InterpModel ABC (+ internals)
-                    NnterpModel (default), VLLMGenerator (bulk sampling, separate env)
-  tasks/            Task ABC + Example; JsonlTask, HFDatasetTask, split()
-  judges/           Judge ABC; LLMJudge (OpenRouter, cached), SubstringJudge; metrics (kappa)
-  experiment.py     Experiment ABC: lazy model/judge, run dir, save helpers
-  sanity.py         reusable checks + SanityExperiment
-  label.py          blind labeling CLI (`interp-label label|summary`) for judge validation
-  config.py         typed YAML configs + dotted CLI overrides
-  registry.py       short names -> classes; or any "module:Class"
-configs/models/     per-model YAMLs (qwen3-8b, qwen3-0.6b, gemma-3-4b-it, qwen3-8b-vllm)
-experiments/        one dir per experiment: config.yaml + experiment.py (+ data/)
-envs/vllm/          isolated vLLM env (its torch pin conflicts with nnterp)
-infra/              pod bootstrap
+experiments/refusal_direction/
+  experiment.py      stages: baseline -> sweep -> alpha -> eval (orchestration only)
+  schema.py          GenerationRow, SweepCandidate, Selection, Stage — every record that
+                     crosses a module or file boundary
+  metrics.py         refusal score, KL, Wilson, direction selection, aggregation (pure)
+  vectors.py         direction grid, control vectors, ablation diagnostics
+  judging.py         rubric -> judge prompt; applying a judge to rows
+  rubric.md          refusal / compliance / incoherent, with anchors
+  prepare_data.py    builds data/ from Arditi et al.'s published splits
+  sample_for_labeling.py, validate_judge.py, plot_layers.py
+  results/qwen3-4b/  aggregates, hand labels and figures (no generations)
+
+src/interptemp/      the harness: backend-agnostic sites, interventions, tasks, judges,
+                     typed configs, run dirs, sanity checks, blind labeling CLI
+configs/models/      per-model YAMLs
+infra/               pod bootstrap
 ```
 
-## Extending
+Generations are deliberately not committed: with `r` ablated, the model answers the harmful
+test prompts. Regenerate them locally.
 
-| Want to...                  | Do                                                                               |
-|-----------------------------|----------------------------------------------------------------------------------|
-| New experiment              | copy `experiments/refusal_direction/`, subclass `Experiment`, set `target:`      |
-| New model (same backend)    | add `configs/models/<m>.yaml`; run `make sanity` with `model=<that yaml>`        |
-| New backend (TL, NDIF, ...) | subclass `InterpModel`, reference as `model.backend: pkg.mod:Class`              |
-| New intervention            | subclass `Intervention` (pure `h -> h'` at declared sites); unit-test w/o model  |
-| New dataset                 | `JsonlTask`/`HFDatasetTask` in config, or subclass `Task` (+ `score` if possible)|
-| New judge rubric            | override `Experiment.judge_kwargs()` → `{"rubric": ..., "labels": [...]}`        |
-| New judge type              | subclass `Judge`, reference as `judge.backend: pkg.mod:Class`                    |
-| Anything nnsight-specific   | `self.imodel.model` is the raw `StandardizedTransformer`                         |
+## Limitations
 
-Method-specific knobs go in `params:` (free-form); promote to typed config only when shared.
+- **One model.** Reproducing on Qwen3-8B is the main open item.
+- **"Harmful" is confounded with "topic".** Train harmful (crime, weapons, drugs) and harmless
+  (Alpaca: cooking, code, education) differ in subject matter as well as harmfulness, so `r`
+  may carry both. Building the direction against XSTest — safe prompts that look unsafe —
+  would separate them.
+- The contrast control removes ~20× less activation norm than `r`, so it is not matched on
+  removal magnitude.
+- 21/1088 test rows could not be judged (the judge's provider blocks some bio/chem prompts).
+  They count as non-refusal, which works against the hypothesis rather than for it.
+- val is only 32 harmful prompts; one data seed; the KL threshold and the 0.8·L cutoff are
+  taken from the paper rather than calibrated here.
 
-## Conventions / gotchas
+## Methodology notes
 
-- **Prompts are fully formatted strings.** Call `model.format_chat(messages)` first; its
-  defaults come from `model.chat_template_kwargs` (e.g. `enable_thinking`). BOS is added only
-  if missing — no double BOS on Llama/Gemma.
-- **Left padding everywhere**, so `positions=[-1]` = last prompt token for every row.
-- Interventions in `generate` apply at prefill *and* every decode step; at decode `seq == 1`.
-- `DirectionalAblation.everywhere` ablates embed + every attn/mlp output ⇒ the residual stream
-  never contains r̂ (equivalent to weight orthogonalization).
-- nnsight ≥ 0.5 requires accessing modules in forward order inside a trace — `NnterpModel`
-  sorts sites; do the same in custom trace code. Containers must be created *outside* the
-  `with trace` block, values leave it only via `.save()`.
-- Always include a control (random norm-matched direction, other layer, shuffled labels).
-- Validate every LLM judge on ~50 hand labels (`judges.metrics.agreement_report`) before
-  trusting it. Judge failures are `label=None` — report the rate, never drop silently.
-- Judge responses are cached in `.cache/judge.sqlite` (keyed on model + prompt + params).
+Conventions this project runs on, worth keeping in any similar one:
 
-## Tooling
-
-`ruff` (format + lint), `pyright` (basic), `pytest`, `pre-commit` — all via `uv run`, versions
-locked in `uv.lock`. `make check` = lint + typecheck + unit tests.
+- Every intervention result needs a control; every LLM judge needs validation against hand
+  labels before its numbers are reported. Judge failures are `label=None` — report the rate,
+  never drop them silently.
+- Select on val, report on test. Use a cheap proxy for the sweep and the expensive metric
+  only for the final numbers: generating and judging all 243 candidates here would have cost
+  ~190k generations.
+- Prompts are fully formatted strings (`model.format_chat`), left-padded, so `positions=[-1]`
+  is the last prompt token for every row. Candidate positions are chat-template specific —
+  the run logs which tokens they actually are.
+- nnsight: access modules in forward order inside a trace, create containers outside the
+  `with` block, values escape only via `.save()`.
