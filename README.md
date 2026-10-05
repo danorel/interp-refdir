@@ -5,6 +5,39 @@ Template for fast mech-interp experiments: generation, activations, intervention
 built in. Default stack: [nnterp](https://github.com/Butanium/nnterp) (nnsight) + Qwen3 +
 OpenRouter, managed with `uv`.
 
+## Results
+
+### Refusal is mediated by a single direction (Qwen3-4B)
+
+A replication of [Arditi et al. 2024](https://arxiv.org/abs/2406.11717) — full write-up,
+method and caveats in [`experiments/refusal_direction/`](experiments/refusal_direction/).
+
+A single mean-diff direction `r`, read off layer 21 at the post-instruction token, controls
+refusal in both directions on held-out test prompts. Judge-labeled, n=64 per condition,
+Wilson 95% CIs:
+
+| Test condition | Ablate `r` on harmful | Add `r` on harmless |
+|---|---|---|
+| no intervention | 86% [75–92] refusal | 0% [0–6] refusal |
+| **`r`** | **5% [2–13]** | **98% [92–100]** |
+| 5 norm-matched random vectors | 88% [84–91] | 0% [0–1] |
+| contrast-direction control | 88% [77–94] | 2% [0–8] |
+
+Removing `r` strips 15.3% of ‖h‖² on harmful prompts but 0.25% on harmless ones, and leaves
+harmless behaviour untouched (64/64 compliance). Neither control family moves either number.
+
+![test conditions](experiments/refusal_direction/results/qwen3-4b/conditions.png)
+
+The effect is confined to layers 20–23; every other layer stays within the no-intervention
+interval. The lower panel is the side-effect guard (KL on harmless prompts) that keeps the
+sweep from "removing refusal" by simply breaking the model:
+
+![layer sweep](experiments/refusal_direction/results/qwen3-4b/layers.png)
+
+The judge was validated at κ = 0.93 against blind hand labels before any of these rates were
+reported. **One model is not a replication** — reproducing this on Qwen3-8B is the main open
+item, along with disentangling "harmful" from "topic" in the training contrast.
+
 ## Status
 
 Early and lightly tested — please open an issue if something breaks.
@@ -27,7 +60,7 @@ make test                    # unit tests, no model (seconds)
 make test-model              # integration tests on Qwen3-0.6B, CPU ok (~1-2 min)
 
 # Any experiment = one config. Swap model / override anything from the CLI:
-uv run interp-run experiments/example_steering/config.yaml \
+uv run interp-run experiments/refusal_direction/config.yaml \
     model=configs/models/qwen3-0.6b.yaml judge=null generation.max_new_tokens=16
 ```
 
@@ -72,7 +105,7 @@ infra/              pod bootstrap
 
 | Want to...                  | Do                                                                               |
 |-----------------------------|----------------------------------------------------------------------------------|
-| New experiment              | copy `experiments/example_steering/`, subclass `Experiment`, set `target:`       |
+| New experiment              | copy `experiments/refusal_direction/`, subclass `Experiment`, set `target:`      |
 | New model (same backend)    | add `configs/models/<m>.yaml`; run `make sanity` with `model=<that yaml>`        |
 | New backend (TL, NDIF, ...) | subclass `InterpModel`, reference as `model.backend: pkg.mod:Class`              |
 | New intervention            | subclass `Intervention` (pure `h -> h'` at declared sites); unit-test w/o model  |
